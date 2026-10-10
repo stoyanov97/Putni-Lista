@@ -86,3 +86,34 @@ export function placeLabel(destination) {
   if (!city) return destination.name
   return destination.name.toLowerCase().includes(city.toLowerCase()) ? destination.name : `${destination.name}, ${city}`
 }
+
+// Линия по реалния път за картата (OSRM route) и нейната дължина в км.
+export async function roadGeometry(points) {
+  const coords = points.map((p) => `${p.lon},${p.lat}`).join(';')
+  const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`)
+  if (!res.ok) return null
+  const data = await res.json()
+  if (data.code !== 'Ok' || !data.routes?.length) return null
+  return {
+    coords: data.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon]),
+    km: Math.round(data.routes[0].distance / 100) / 10,
+  }
+}
+
+// Превръща текста на маршрута в точки за картата:
+// "Офис София – Склад „Бета“, Божурище – Офис София" → [офис, склад, офис].
+// Сравнява с името с града (както е в листа) и с чистото име.
+export function resolveRoute(route, destinations) {
+  const norm = (s) => String(s).toLowerCase().replace(/\s+/g, ' ').trim()
+  const byName = new Map()
+  for (const d of destinations) {
+    if (d.lat == null) continue
+    byName.set(norm(placeLabel(d)), d)
+    byName.set(norm(d.name), d)
+  }
+  const points = String(route)
+    .split(' – ')
+    .map((part) => byName.get(norm(part)))
+    .filter(Boolean)
+  return points.filter((p, i) => i === 0 || p.id !== points[i - 1].id)
+}

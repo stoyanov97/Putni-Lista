@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, friendlyError } from '../lib/supabase'
 
-export default function RegistryPage({ table, title, intro, fields, columns, orderBy = 'id', prepare, validate, emptyText }) {
+export default function RegistryPage({ table, title, intro, fields, columns, orderBy = 'id', prepare, validate, emptyText, extra }) {
   const blank = Object.fromEntries(fields.map((f) => [f.name, f.type === 'checkbox' ? false : '']))
   const [rows, setRows] = useState([])
   const [form, setForm] = useState(blank)
@@ -78,6 +78,7 @@ export default function RegistryPage({ table, title, intro, fields, columns, ord
     <section>
       <h2>{title}</h2>
       {intro && <p className="muted">{intro}</p>}
+      {extra}
 
       <form className="panel form-grid" onSubmit={save}>
         {fields.map((f) => (

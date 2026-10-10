@@ -3,7 +3,7 @@ import { fmtDate, fmtNum } from '../lib/format'
 import { fuelLiters } from '../lib/routeGenerator'
 import { summarize, waybillNumber } from '../lib/waybillSummary'
 
-export default function WaybillDocument({ data }) {
+export default function WaybillDocument({ data, selected, onSelect }) {
   const { waybill, trips, refuelings, company } = data
   const v = waybill.vehicles
   const d = waybill.drivers
@@ -47,8 +47,12 @@ export default function WaybillDocument({ data }) {
           </tr>
         </thead>
         <tbody>
-          {trips.map((t) => (
-            <tr key={t.id} className={t.is_personal ? 'personal' : ''}>
+          {trips.map((t, i) => (
+            <tr
+              key={t.id}
+              className={[t.is_personal ? 'personal' : '', onSelect ? 'clickable' : '', selected === i ? 'selected' : ''].join(' ')}
+              onClick={onSelect ? () => onSelect(i) : undefined}
+            >
               <td>{t.seq}</td>
               <td>{fmtDate(t.trip_date)}</td>
               <td>{t.route}{t.is_personal && !/лично ползване/i.test(t.route) && ' (лично ползване)'}</td>

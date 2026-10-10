@@ -157,3 +157,21 @@ tr.personal td { background: #fdf7ec; }
   @page { size: A4; margin: 12mm; }
 }
 .callout { background: #fbf0dc; border: 1px solid #f0d9a8; padding: .7rem 1rem; border-radius: 4px; margin-bottom: 1rem; max-width: 80ch; }
+
+/* Карта */
+.map-panel { max-width: 1000px; margin-top: 1.5rem; }
+.map-select { max-width: 640px; margin-bottom: .6rem; }
+.route-map { height: 420px; border: 1px solid var(--line); border-radius: 4px; }
+.map-note { margin: .4rem 0 0; }
+.sheet-table tr.clickable { cursor: pointer; }
+.sheet-table tr.clickable:hover td { background: #f3f6fa; }
+.sheet-table tr.selected td { background: #e3ebf6; }
+@media print { .sheet-table tr.selected td { background: none; } }
+
+/* Импорт */
+.panel.import { padding: .8rem 1.2rem; }
+.link-btn { border: none; background: none; padding: 0; color: var(--ink); font-weight: 500; }
+.import-body { margin-top: .8rem; }
+.file-btn { position: relative; display: inline-flex; flex-direction: row; align-items: center; padding: .45rem .9rem; border: 1px solid var(--ink); border-radius: 4px; color: var(--ink); background: var(--paper); cursor: pointer; font-size: 15px; }
+.file-btn:focus-within { outline: 2px solid var(--ink-soft); outline-offset: 1px; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }

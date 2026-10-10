@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import RegistryPage from '../components/RegistryPage'
+import ImportDestinations from '../components/ImportDestinations'
 import { geocode } from '../lib/maps'
 
 // При запис адресът се търси в OpenStreetMap, за да получим координати.
@@ -26,8 +28,11 @@ async function addCoordinates(values, { original }) {
 }
 
 export default function Destinations() {
+  const [reloadKey, setReloadKey] = useState(0)
   return (
+    <>
     <RegistryPage
+      key={reloadKey}
       table="destinations"
       title="Дестинации"
       intro="Клиенти, обекти и доставчици, между които системата ще разпределя пътуванията. Отбележете офиса като база: всеки маршрут започва и завършва там."
@@ -46,6 +51,8 @@ export default function Destinations() {
         { label: 'Цел', key: 'purpose' },
         { label: 'В картата', render: (r) => (r.lat != null ? 'Намерен' : <span className="warn">Не е намерен</span>) },
       ]}
+      extra={<ImportDestinations onImported={() => setReloadKey((k) => k + 1)} />}
     />
+    </>
   )
 }
