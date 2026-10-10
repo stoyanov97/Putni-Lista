@@ -1,1 +1,17 @@
+# Безплатният Supabase проект "заспива" след 7 дни без заявки.
+# Това задание пуска една лека заявка на всеки 3 дни, за да остане активен.
+name: Supabase keep-alive
 
+on:
+  schedule:
+    - cron: '0 6 */3 * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        run: |
+          curl -sf "https://mfblcwqycypgyifeeisb.supabase.co/rest/v1/company?select=id" \
+            -H "apikey: sb_publishable_yEq3iwLEJ52eUYqcn7X7uw_-mlwqCas" -o /dev/null -w "HTTP %{http_code}\n"
