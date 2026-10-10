@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { generateTrips, recalculate, fuelLiters } from '../lib/routeGenerator'
 import { loadSetup, lastIssued, issuedOverlapping, saveDraft, issue, loadWaybill } from '../lib/waybillData'
 import { fmtDate, fmtNum } from '../lib/format'
+import { placeLabel } from '../lib/maps'
 
 const iso = (d) => d.toISOString().slice(0, 10)
 function previousMonth() {
@@ -103,12 +104,14 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
     if (overlap.length) {
       return setError(`За този период вече има издаден лист № ${overlap[0].number} (${fmtDate(overlap[0].period_from)} – ${fmtDate(overlap[0].period_to)}).`)
     }
-    const base = setup.destinations.find((d) => d.is_base)
+    // В маршрута се пише името с града: "Клиент „Гама“ АД, Пловдив".
+    const places = setup.destinations.map((d) => ({ ...d, name: placeLabel(d) }))
+    const base = places.find((d) => d.is_base)
     if (!base) return setError('Няма база (офис). Отбележете една дестинация като база.')
     try {
       const result = generateTrips({
         periodFrom: form.periodFrom, periodTo: form.periodTo, targetKm: requestedKm, startOdometer,
-        base, destinations: setup.destinations, distance: setup.distance,
+        base, destinations: places, distance: setup.distance,
         excludedDates: form.excluded, includeWeekends: form.includeWeekends,
         maxDailyKm: Number(form.maxDailyKm) || 400, personalKm: Number(form.personalKm) || 0,
         seed: Math.floor(Math.random() * 2 ** 31),

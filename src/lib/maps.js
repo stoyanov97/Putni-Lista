@@ -78,3 +78,11 @@ export function haversineKm(a, b) {
 export function estimatedDistances(points) {
   return points.map((a) => points.map((b) => (a === b ? 0 : Math.round(haversineKm(a, b) * 1.3 * 10) / 10)))
 }
+
+// Име за маршрута: "Клиент „Гама“ АД, Пловдив". Градът се взима от адреса и
+// се добавя само ако вече не е в името (напр. "Офис София" остава същото).
+export function placeLabel(destination) {
+  const city = settlementCandidates(destination.address || '')[0]
+  if (!city) return destination.name
+  return destination.name.toLowerCase().includes(city.toLowerCase()) ? destination.name : `${destination.name}, ${city}`
+}

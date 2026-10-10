@@ -2,7 +2,7 @@
 // Ред = откъде, колона = докъде. Попълва се от картата и може да се коригира на ръка.
 import { useEffect, useState } from 'react'
 import { supabase, friendlyError } from '../lib/supabase'
-import { roadDistances, estimatedDistances } from '../lib/maps'
+import { roadDistances, estimatedDistances, placeLabel } from '../lib/maps'
 
 const key = (from, to) => `${from}-${to}`
 
@@ -110,13 +110,13 @@ export default function Distances() {
             <thead>
               <tr>
                 <th>от \ до</th>
-                {places.map((p) => <th key={p.id} className="num">{p.name}</th>)}
+                {places.map((p) => <th key={p.id} className="num">{placeLabel(p)}</th>)}
               </tr>
             </thead>
             <tbody>
               {places.map((from) => (
                 <tr key={from.id}>
-                  <th>{from.name}{from.is_base && ' (база)'}</th>
+                  <th>{placeLabel(from)}{from.is_base && ' (база)'}</th>
                   {places.map((to) => {
                     if (from.id === to.id) return <td key={to.id} className="num diag">–</td>
                     const k = key(from.id, to.id)
