@@ -167,8 +167,11 @@ export function generateTrips(options) {
   let gap = businessKm // > 0: липсват км; < 0: има излишни
   const usage = new Map()
   // Предпочитаме по-рядко използвани пътувания, за да има разнообразие.
+  // Обиколките с 3 спирки са много повече на брой от тези с 1, затова
+  // ги "обезтежаваме": иначе почти всеки ден би бил дълга обиколка.
+  const STOP_WEIGHT = [1, 1, 0.55, 0.3]
   const pickVaried = (list) => {
-    const weights = list.map((t) => 1 / (1 + (usage.get(t.key) || 0)))
+    const weights = list.map((t) => STOP_WEIGHT[t.stops.length] / (1 + (usage.get(t.key) || 0)))
     let r = random() * weights.reduce((a, b) => a + b, 0)
     for (let i = 0; i < list.length; i++) {
       r -= weights[i]
@@ -206,13 +209,19 @@ export function generateTrips(options) {
   }
   const freeDays = days.filter((d) => !reserved.has(d))
 
+  // Типичната дължина на еднодневно пътуване: отиване до един клиент и обратно.
+  const singleKms = tours.filter((t) => t.stops.length === 1).map((t) => t.km).sort((a, b) => a - b)
+  const typicalTour = singleKms.length ? singleKms[Math.floor(singleKms.length / 2)] : medianTour
+
   // ---- 3б. Еднодневни обиколки в свободните дни ----
   const trips = [] // { date, tour }
   const dayKm = new Map()
   const toursOn = (date) => trips.filter((t) => t.date === date).length
   if (tours.length && freeDays.length && gap >= minTour * 0.6) {
-    const neededDays = Math.ceil(gap / maxDailyKm)
-    const dayCount = Math.min(freeDays.length, Math.max(1, neededDays, Math.round(gap / medianTour)))
+    // Колко дни с пътувания: по типичното отиване до един клиент, не по средната
+    // от всички обиколки (тя е изкривена към дългите обиколки с 3 спирки).
+    const neededDays = Math.ceil(gap / (maxDailyKm * 0.8))
+    const dayCount = Math.min(freeDays.length, Math.max(1, neededDays, Math.round(gap / typicalTour)))
     const travelDays = shuffle(random, freeDays).slice(0, dayCount).sort()
     const weights = travelDays.map(() => 0.6 + random() * 0.8)
     const weightSum = weights.reduce((a, b) => a + b, 0)
@@ -270,7 +279,11 @@ export function generateTrips(options) {
         : [...freeDays].filter((d) => toursOn(d) < MAX_TOURS_PER_DAY).sort((a, b) => dayKm.get(a) - dayKm.get(b))[0]
       if (date) {
         const used2 = dayKm.get(date) || 0
-        const t = tours.filter((x) => x.km <= gap + 1 && used2 + x.km <= maxDailyKm).sort((a, b) => b.km - a.km)[0]
+        const fitting = tours.filter((x) => x.km <= gap + 1 && used2 + x.km <= maxDailyKm)
+        const aim = Math.min(gap, typicalTour)
+        const t = fitting.length
+          ? pickVaried(fitting.sort((a, b) => Math.abs(a.km - aim) - Math.abs(b.km - aim)).slice(0, 5))
+          : null
         if (t) {
           trips.push({ date, tour: t })
           use(t)
@@ -385,7 +398,16 @@ export function generateTrips(options) {
     })),
   ]
   if (personalKm > 0) {
-    rows.push({ date: periodTo, order: 2, route: 'Лично ползване', purpose: 'Лично ползване', km: personalKm, isPersonal: true })
+    // Личното ползване е най-правдоподобно в почивен ден без служебни пътувания;
+    // ако няма такъв, в работен ден без пътувания; накрая в последния ден.
+    const busy = new Set(rows.map((r) => r.date))
+    const allDays = []
+    for (let d = periodFrom; d <= periodTo; d = nextCalendarDay(d)) allDays.push(d)
+    const weekday = (iso) => new Date(iso + 'T00:00:00Z').getUTCDay()
+    const weekends = allDays.filter((d) => (weekday(d) === 0 || weekday(d) === 6) && !busy.has(d))
+    const quiet = allDays.filter((d) => !busy.has(d))
+    const date = weekends.length ? pickRandom(random, weekends) : quiet.length ? pickRandom(random, quiet) : periodTo
+    rows.push({ date, order: 2, route: 'Лично ползване', purpose: 'Лично ползване', km: personalKm, isPersonal: true })
   }
   rows.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order)
 
