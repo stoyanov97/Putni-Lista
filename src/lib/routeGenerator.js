@@ -170,8 +170,12 @@ export function generateTrips(options) {
   // Обиколките с 3 спирки са много повече на брой от тези с 1, затова
   // ги "обезтежаваме": иначе почти всеки ден би бил дълга обиколка.
   const STOP_WEIGHT = [1, 1, 0.55, 0.3]
+  // Клиенти, които още не са посетени в периода, получават предимство,
+  // за да присъстват всички дестинации, а не само най-близките.
+  const visited = new Map()
+  const unvisitedBonus = (t) => 1 + 3 * t.stops.filter((d) => !visited.get(d.id)).length
   const pickVaried = (list) => {
-    const weights = list.map((t) => STOP_WEIGHT[t.stops.length] / (1 + (usage.get(t.key) || 0)))
+    const weights = list.map((t) => (STOP_WEIGHT[t.stops.length] * unvisitedBonus(t)) / (1 + (usage.get(t.key) || 0)))
     let r = random() * weights.reduce((a, b) => a + b, 0)
     for (let i = 0; i < list.length; i++) {
       r -= weights[i]
@@ -179,7 +183,10 @@ export function generateTrips(options) {
     }
     return list[list.length - 1]
   }
-  const use = (tour, delta = 1) => usage.set(tour.key, (usage.get(tour.key) || 0) + delta)
+  const use = (tour, delta = 1) => {
+    usage.set(tour.key, (usage.get(tour.key) || 0) + delta)
+    for (const d of tour.stops) visited.set(d.id, (visited.get(d.id) || 0) + delta)
+  }
 
   // ---- 3а. Двудневни командировки ----
   const longTrips = [] // { tour, dates: [ден1, ден2] }
@@ -217,13 +224,31 @@ export function generateTrips(options) {
   const trips = [] // { date, tour }
   const dayKm = new Map()
   const toursOn = (date) => trips.filter((t) => t.date === date).length
-  if (tours.length && freeDays.length && gap >= minTour * 0.6) {
+  // 3б-1. Като реален търговец: всеки близък клиент се посещава поне веднъж
+  // в периода (с вероятност 80%, за да не е шаблон). Едно посещение не
+  // може да изяде повече от половината от оставащите км.
+  const seededDays = new Set()
+  for (const tour of shuffle(random, tours.filter((t) => t.stops.length === 1))) {
+    const open = freeDays.filter((d) => !seededDays.has(d))
+    if (!open.length || random() > 0.8 || tour.km > gap * 0.5) continue
+    const date = pickRandom(random, open)
+    trips.push({ date, tour, planned: true }) // планираното посещение не се разменя
+    use(tour)
+    dayKm.set(date, tour.km)
+    seededDays.add(date)
+    gap -= tour.km
+  }
+  const restDays = freeDays.filter((d) => !seededDays.has(d))
+
+  if (tours.length && restDays.length && gap >= minTour * 0.6) {
     // Колко дни с пътувания: по типичното отиване до един клиент, не по средната
     // от всички обиколки (тя е изкривена към дългите обиколки с 3 спирки).
     const neededDays = Math.ceil(gap / (maxDailyKm * 0.8))
-    const dayCount = Math.min(freeDays.length, Math.max(1, neededDays, Math.round(gap / typicalTour)))
-    const travelDays = shuffle(random, freeDays).slice(0, dayCount).sort()
-    const weights = travelDays.map(() => 0.6 + random() * 0.8)
+    const dayCount = Math.min(restDays.length, Math.max(1, neededDays, Math.round(gap / typicalTour)))
+    const travelDays = shuffle(random, restDays).slice(0, dayCount).sort()
+    // Повечето дни са "обикновени", но около всеки пети е по-дълъг. Иначе
+    // по-далечните еднодневни клиенти (напр. Пловдив) никога не биха попаднали в листа.
+    const weights = travelDays.map(() => (0.6 + random() * 0.8) * (random() < 0.2 ? 2.4 : 1))
     const weightSum = weights.reduce((a, b) => a + b, 0)
     const dayTargets = weights.map((w) => (w / weightSum) * gap)
     let previousKey = null
@@ -236,9 +261,13 @@ export function generateTrips(options) {
         const fitting = tours.filter((t) => used + t.km <= maxDailyKm)
         // Не повтаряме вчерашния маршрут, освен ако няма друг вариант.
         const fresh = fitting.filter((t) => t.key !== previousKey)
-        const candidates = (fresh.length ? fresh : fitting)
-          .sort((a, b) => Math.abs(a.km - aim) - Math.abs(b.km - aim))
-          .slice(0, 4)
+        // Кандидати: всички обиколки в разумен прозорец около целта (±25%),
+        // а не само 4-те най-близки. Иначе многото комбинации с 2–3 спирки
+        // изместват единичните посещения при по-далечни клиенти.
+        const pool = (fresh.length ? fresh : fitting).sort((a, b) => Math.abs(a.km - aim) - Math.abs(b.km - aim))
+        const window = Math.max(25, aim * 0.25)
+        const near = pool.filter((t) => Math.abs(t.km - aim) <= window)
+        const candidates = near.length >= 3 ? near : pool.slice(0, 4)
         if (candidates.length === 0) break
         const tour = pickVaried(candidates)
         trips.push({ date, tour })
@@ -253,8 +282,12 @@ export function generateTrips(options) {
   }
 
   // ---- 4. Донастройка чрез размяна ----
+  const swappable = () => {
+    const free = trips.filter((t) => !t.planned)
+    return free.length ? free : trips
+  }
   for (let iter = 0; iter < 5000 && Math.abs(gap) > 1 && trips.length > 0; iter++) {
-    const trip = pickRandom(random, trips)
+    const trip = pickRandom(random, swappable())
     const used = dayKm.get(trip.date) - trip.tour.km
     const wanted = trip.tour.km + gap
     const best = tours
@@ -296,8 +329,8 @@ export function generateTrips(options) {
 
   // 4б. Размяна на две пътувания наведнъж.
   for (let iter = 0; iter < 400 && Math.abs(gap) > 1 && trips.length > 1; iter++) {
-    const a = pickRandom(random, trips)
-    const b = pickRandom(random, trips)
+    const a = pickRandom(random, swappable())
+    const b = pickRandom(random, swappable())
     if (a === b) continue
     const target = a.tour.km + b.tour.km + gap
     const roomA = maxDailyKm - (dayKm.get(a.date) - a.tour.km)

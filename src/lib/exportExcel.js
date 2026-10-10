@@ -154,8 +154,12 @@ function addSummarySheet(workbook, list) {
     ws.getCell(`L${n}`).numFmt = '#,##0.00'
   })
   const end = list.length + 1
+  // Готовите стойности (result) се показват и в Protected View, където Excel не смята формули.
+  const sums = list.map(({ waybill, trips }) => summarize(waybill, trips))
+  const add = (key) => Math.round(sums.reduce((a, s) => a + s[key], 0) * 100) / 100
   const totalRow = ws.addRow(['Общо', '', '', '', '', '', '',
-    { formula: `SUM(H2:H${end})` }, { formula: `SUM(I2:I${end})` }, { formula: `SUM(J2:J${end})` }, '', { formula: `SUM(L2:L${end})` }])
+    { formula: `SUM(H2:H${end})`, result: add('total') }, { formula: `SUM(I2:I${end})`, result: add('business') },
+    { formula: `SUM(J2:J${end})`, result: add('personal') }, '', { formula: `SUM(L2:L${end})`, result: add('liters') }])
   totalRow.font = { bold: true }
   ws.getCell(`L${end + 1}`).numFmt = '#,##0.00'
   ws.views = [{ state: 'frozen', ySplit: 1 }]
