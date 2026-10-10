@@ -25,6 +25,20 @@ async function searchOnce(query) {
   return data[0] ? { lat: Number(data[0].lat), lon: Number(data[0].lon) } : null
 }
 
+// Населеното място от адреса: след "гр." или "с.", иначе последната или първата част.
+export function settlementCandidates(address) {
+  const explicit = String(address).match(/(?:^|[\s,])(?:гр|с)\.\s*([^,\d]+)/i)
+  if (explicit) return [explicit[1].trim()]
+  const street = /^(ул|бул|ж\.?\s?к|кв|пл|бл|вх|ет|ап)\b|^(ул|бул|ж\.к|жк|кв|пл|бл)\./i
+  const parts = String(address)
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => !street.test(p))
+    .map((p) => cleanAddress(p).replace(/\d+/g, '').trim())
+    .filter((p) => p.length > 2)
+  return [...new Set([parts[parts.length - 1], parts[0]].filter(Boolean))]
+}
+
 // Опитва: пълния адрес → без съкращения → само населеното място (по-неточно).
 export async function geocode(address) {
   const cleaned = cleanAddress(address)
@@ -34,9 +48,12 @@ export async function geocode(address) {
     if (hit) return { ...hit, precise: true }
     await sleep(1100) // Nominatim позволява до 1 заявка в секунда
   }
-  const city = cleaned.split(',')[0]
-  const hit = city ? await searchOnce(city) : null
-  return hit ? { ...hit, precise: false } : null
+  for (const place of settlementCandidates(address)) {
+    const hit = await searchOnce(place)
+    if (hit) return { ...hit, precise: false }
+    await sleep(1100)
+  }
+  return null
 }
 
 // Матрица с разстояния в км; null, ако между две точки няма маршрут.

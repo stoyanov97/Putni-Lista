@@ -6,6 +6,9 @@ import Vehicles from './pages/Vehicles'
 import Drivers from './pages/Drivers'
 import Destinations from './pages/Destinations'
 import Distances from './pages/Distances'
+import NewWaybill from './pages/NewWaybill'
+import History from './pages/History'
+import WaybillView from './pages/WaybillView'
 
 // Навигацията следва реда на работа: първо регистрите, после листовете.
 const sections = [
@@ -17,14 +20,17 @@ const sections = [
     { id: 'distances', label: 'Разстояния', page: Distances },
   ] },
   { group: 'Пътни листа', items: [
-    { id: 'new', label: 'Нов пътен лист', page: null },
-    { id: 'history', label: 'История', page: null },
+    { id: 'new', label: 'Нов пътен лист', page: NewWaybill },
+    { id: 'history', label: 'История', page: History },
   ] },
 ]
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = още проверяваме
-  const [current, setCurrent] = useState('company')
+  // Текуща страница + параметри (напр. кой лист да се отвори)
+  const [route, setRoute] = useState({ page: 'company', params: {} })
+  const navigate = (page, params = {}) => setRoute({ page, params })
+  const current = route.page
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -35,18 +41,19 @@ export default function App() {
   if (session === undefined) return null
   if (!session) return <Login />
 
-  const item = sections.flatMap((s) => s.items).find((i) => i.id === current)
-  const Page = item.page
+  const pages = [...sections.flatMap((s) => s.items), { id: 'view', page: WaybillView }]
+  const Page = pages.find((i) => i.id === current).page
+  const activeNav = current === 'view' ? 'history' : current
 
   return (
     <div className="layout">
-      <nav className="sidebar">
+      <nav className="sidebar no-print">
         <div className="brand">Пътни листа</div>
         {sections.map((s) => (
           <div key={s.group} className="nav-group">
             <div className="nav-title">{s.group}</div>
             {s.items.map((i) => (
-              <button key={i.id} className={i.id === current ? 'nav-item active' : 'nav-item'} onClick={() => setCurrent(i.id)}>
+              <button key={i.id} className={i.id === activeNav ? 'nav-item active' : 'nav-item'} onClick={() => navigate(i.id)}>
                 {i.label}
               </button>
             ))}
@@ -58,7 +65,7 @@ export default function App() {
         </div>
       </nav>
       <main className="content">
-        {Page ? <Page /> : <p className="empty">Тази част предстои.</p>}
+        <Page key={JSON.stringify(route)} navigate={navigate} {...route.params} />
       </main>
     </div>
   )
