@@ -50,7 +50,7 @@ create table distances (
   from_id bigint not null references destinations(id) on delete cascade,
   to_id   bigint not null references destinations(id) on delete cascade,
   km      numeric(7,1) not null check (km > 0),
-  source  text not null default 'osrm' check (source in ('osrm', 'manual')),
+  source  text not null default 'osrm' check (source in ('osrm', 'manual', 'estimate')),
   primary key (from_id, to_id),
   check (from_id <> to_id)
 );

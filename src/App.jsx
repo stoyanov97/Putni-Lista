@@ -5,6 +5,7 @@ import Company from './pages/Company'
 import Vehicles from './pages/Vehicles'
 import Drivers from './pages/Drivers'
 import Destinations from './pages/Destinations'
+import Distances from './pages/Distances'
 
 // Навигацията следва реда на работа: първо регистрите, после листовете.
 const sections = [
@@ -13,6 +14,7 @@ const sections = [
     { id: 'vehicles', label: 'Автомобили', page: Vehicles },
     { id: 'drivers', label: 'Водачи', page: Drivers },
     { id: 'destinations', label: 'Дестинации', page: Destinations },
+    { id: 'distances', label: 'Разстояния', page: Distances },
   ] },
   { group: 'Пътни листа', items: [
     { id: 'new', label: 'Нов пътен лист', page: null },

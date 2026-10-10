@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 
+function loginError(message) {
+  if (message === 'Invalid login credentials') return 'Грешен имейл или парола.'
+  if (message === 'Email not confirmed') return 'Имейлът не е потвърден. Потвърдете потребителя в Supabase.'
+  return message
+}
+
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -12,7 +18,7 @@ export default function Login() {
     setBusy(true)
     setError('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setError('Грешен имейл или парола.')
+    if (error) setError(loginError(error.message))
     setBusy(false)
   }
 

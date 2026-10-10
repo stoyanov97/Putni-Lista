@@ -9,6 +9,8 @@ export default function RegistryPage({ table, title, intro, fields, columns, ord
   const [form, setForm] = useState(blank)
   const [editingId, setEditingId] = useState(null)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
 
   async function load() {
@@ -31,6 +33,15 @@ export default function RegistryPage({ table, title, intro, fields, columns, ord
     setError('')
   }
 
+  // prepare може да е асинхронна (напр. търсене на адрес в картата) и да върне
+  // { values, notice }, където notice е предупреждение за потребителя.
+  async function runPrepare(values) {
+    if (!prepare) return { values }
+    const original = rows.find((r) => r.id === editingId)
+    const result = await prepare(values, { original })
+    return result && 'values' in result ? result : { values: result }
+  }
+
   async function save(e) {
     e.preventDefault()
     let values = { ...form }
@@ -38,16 +49,20 @@ export default function RegistryPage({ table, title, intro, fields, columns, ord
       if (f.type === 'number') values[f.name] = values[f.name] === '' ? null : Number(values[f.name])
       if (f.type === 'text' || f.type === 'select') values[f.name] = String(values[f.name] ?? '').trim() || null
     }
-    if (prepare) values = prepare(values)
     const problem = validate ? validate(values) : ''
     if (problem) return setError(problem)
 
+    setBusy(true)
+    setNotice('')
+    const prepared = await runPrepare(values)
     const query = editingId
-      ? supabase.from(table).update(values).eq('id', editingId)
-      : supabase.from(table).insert(values)
+      ? supabase.from(table).update(prepared.values).eq('id', editingId)
+      : supabase.from(table).insert(prepared.values)
     const { error } = await query
+    setBusy(false)
     if (error) return setError(friendlyError(error))
     cancel()
+    setNotice(prepared.notice || '')
     load()
   }
 
@@ -96,9 +111,10 @@ export default function RegistryPage({ table, title, intro, fields, columns, ord
           </label>
         ))}
         <div className="form-actions">
-          <button className="primary">{editingId ? 'Запази промените' : 'Добави'}</button>
+          <button className="primary" disabled={busy}>{busy ? 'Записване…' : editingId ? 'Запази промените' : 'Добави'}</button>
           {editingId && <button type="button" onClick={cancel}>Откажи</button>}
           {error && <p className="error">{error}</p>}
+          {notice && <p className="warn">{notice}</p>}
         </div>
       </form>
 
