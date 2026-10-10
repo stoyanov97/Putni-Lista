@@ -6,14 +6,17 @@
 //
 // Стъпки:
 //  1. Работни дни в периода (без почивни, празници и отпуски).
-//  2. Възможни обиколки: База → 1 до 3 дестинации → База, с реалните разстояния.
-//  3. Избор колко дни ще има пътувания и разпределение на км по тях със
-//     случайни тегла, за да не се повтаря шаблон.
-//  4. За всеки ден се избира обиколка, близка до целта за деня
-//     (случайно между няколкото най-близки, без да се повтаря вчерашната).
-//  5. Донастройка: обиколки се разменят, докато разликата стане ≤ 1 км.
-//  6. Гаранция: ако разликата още е над 1 км, се маха излишно пътуване
-//     и/или се добавя кратко градско служебно пътуване с точния остатък.
+//  2. Възможни пътувания:
+//     - еднодневни обиколки: База → 1 до 3 дестинации → База;
+//     - двудневни командировки до далечни дестинации (обиколката е над
+//       дневния лимит): ден 1 База → Х, ден 2 Х → База, в поредни дни.
+//  3. Част от км се покриват с командировки (според дела на далечните
+//     дестинации), останалите дни се пълнят с еднодневни обиколки.
+//     Км се разпределят по дни със случайни тегла, без повтарящ се шаблон.
+//  4. Донастройка: пътувания се разменят (по едно и по две), докато
+//     разликата стане ≤ 1 км.
+//  5. Гаранция: ако разликата още е над 1 км, се маха излишно пътуване
+//     и/или се добавят кратки градски служебни пътувания с точния остатък.
 //     Затова толерансът е спазен винаги, а не "обикновено".
 // =====================================================================
 
@@ -80,6 +83,34 @@ function shuffle(random, list) {
   return a
 }
 
+// Двудневни командировки: обиколката не се събира в един ден,
+// но всяка посока поотделно се събира.
+export function buildLongTours(base, destinations, distance, maxDailyKm) {
+  return destinations.flatMap((d) => {
+    if (d.id === base.id) return []
+    const out = distance(base.id, d.id)
+    const back = distance(d.id, base.id)
+    if (out == null || back == null) return []
+    if (out + back <= maxDailyKm || out > maxDailyKm || back > maxDailyKm) return []
+    const legs = [Math.round(out), Math.round(back)]
+    return [{ key: `long-${d.id}`, stops: [d], legs, km: legs[0] + legs[1] }]
+  })
+}
+
+const nextCalendarDay = (iso) => {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+const CITY_PURPOSES = [
+  'Банка и куриер',
+  'Документи в НАП / НОИ',
+  'Покупка на консумативи',
+  'Пощенски и куриерски пратки',
+  'Среща с местен контрагент',
+]
+
 export function generateTrips(options) {
   const {
     periodFrom,
@@ -113,59 +144,106 @@ export function generateTrips(options) {
   }
 
   const tours = buildTours(base, destinations, distance).filter((t) => t.km <= maxDailyKm)
-  if (tours.length === 0) {
-    throw new Error('Няма дестинации с разстояние до базата под дневния лимит. Добавете дестинации и разстояния.')
+  const longTours = buildLongTours(base, destinations, distance, maxDailyKm)
+  if (tours.length === 0 && longTours.length === 0) {
+    throw new Error('Няма дестинации с разстояние до базата. Добавете дестинации и изчислете разстоянията.')
   }
   const kms = tours.map((t) => t.km).sort((a, b) => a - b)
-  const minTour = kms[0]
-  const medianTour = kms[Math.floor(kms.length / 2)]
+  const minTour = kms[0] ?? Infinity
+  const maxTour = kms[kms.length - 1] ?? 0
+  const medianTour = kms[Math.floor(kms.length / 2)] ?? 0
 
   // Най-много км, които могат да се покрият правдоподобно с тези дестинации.
-  const perDayCapacity = Math.min(maxDailyKm, MAX_TOURS_PER_DAY * kms[kms.length - 1] + CITY_TRIP_MAX_KM)
+  const shortCapacity = Math.min(maxDailyKm, MAX_TOURS_PER_DAY * maxTour + CITY_TRIP_MAX_KM)
+  const longCapacity = longTours.length ? Math.max(...longTours.map((t) => t.km)) / 2 : 0
+  const perDayCapacity = Math.max(shortCapacity, longCapacity)
   if (businessKm > days.length * perDayCapacity) {
     throw new Error(
-      `С тези дестинации могат да се покрият най-много около ${days.length * perDayCapacity} км за периода. ` +
+      `С тези дестинации могат да се покрият най-много около ${Math.floor(days.length * perDayCapacity)} км за периода. ` +
         'Добавете по-далечни дестинации или удължете периода.',
     )
   }
 
-  // ---- 3. Колко дни ще има пътувания и колко км на ден ----
-  const neededDays = Math.ceil(businessKm / maxDailyKm)
-  const dayCount = Math.min(days.length, Math.max(1, neededDays, Math.round(businessKm / medianTour)))
-  const travelDays = shuffle(random, days).slice(0, dayCount).sort()
-  const weights = travelDays.map(() => 0.6 + random() * 0.8)
-  const weightSum = weights.reduce((a, b) => a + b, 0)
-  const dayTargets = weights.map((w) => (w / weightSum) * businessKm)
+  let gap = businessKm // > 0: липсват км; < 0: има излишни
+  const usage = new Map()
+  // Предпочитаме по-рядко използвани пътувания, за да има разнообразие.
+  const pickVaried = (list) => {
+    const weights = list.map((t) => 1 / (1 + (usage.get(t.key) || 0)))
+    let r = random() * weights.reduce((a, b) => a + b, 0)
+    for (let i = 0; i < list.length; i++) {
+      r -= weights[i]
+      if (r <= 0) return list[i]
+    }
+    return list[list.length - 1]
+  }
+  const use = (tour, delta = 1) => usage.set(tour.key, (usage.get(tour.key) || 0) + delta)
 
-  // ---- 4. Избор на обиколки за всеки ден ----
+  // ---- 3а. Двудневни командировки ----
+  const longTrips = [] // { tour, dates: [ден1, ден2] }
+  const reserved = new Set()
+  if (longTours.length) {
+    const shortDestinations = new Set(tours.filter((t) => t.stops.length === 1).map((t) => t.stops[0].id)).size
+    const share = tours.length ? longTours.length / (longTours.length + shortDestinations) : 1
+    let budget = tours.length ? businessKm * share * (0.7 + random() * 0.6) : businessKm
+    const pairs = days
+      .map((d, i) => [d, days[i + 1]])
+      .filter(([a, b]) => b && nextCalendarDay(a) === b)
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const free = pairs.filter(([a, b]) => !reserved.has(a) && !reserved.has(b))
+      const options = longTours.filter((t) => t.km <= gap && t.km <= budget + t.km / 2)
+      if (!free.length || !options.length) break
+      // Оставяме достатъчно свободни дни за останалите км.
+      const tour = pickVaried(options)
+      const daysLeft = days.length - reserved.size - 2
+      if (tours.length && (gap - tour.km) > daysLeft * shortCapacity) continue
+      const pair = pickRandom(random, free)
+      longTrips.push({ tour, dates: pair })
+      pair.forEach((d) => reserved.add(d))
+      use(tour)
+      gap -= tour.km
+      budget -= tour.km
+    }
+  }
+  const freeDays = days.filter((d) => !reserved.has(d))
+
+  // ---- 3б. Еднодневни обиколки в свободните дни ----
   const trips = [] // { date, tour }
   const dayKm = new Map()
   const toursOn = (date) => trips.filter((t) => t.date === date).length
-  let previousKey = null
-  travelDays.forEach((date, i) => {
-    let remaining = dayTargets[i]
-    let count = 0
-    while (remaining >= minTour * 0.6 && count < MAX_TOURS_PER_DAY) {
-      const used = dayKm.get(date) || 0
-      const aim = remaining > kms[kms.length - 1] * 1.2 ? Math.min(remaining / 2, kms[kms.length - 1]) : remaining
-      const candidates = tours
-        .filter((t) => t.key !== previousKey && used + t.km <= maxDailyKm)
-        .sort((a, b) => Math.abs(a.km - aim) - Math.abs(b.km - aim))
-        .slice(0, 4)
-      if (candidates.length === 0) break
-      const tour = pickRandom(random, candidates)
-      trips.push({ date, tour })
-      dayKm.set(date, used + tour.km)
-      remaining -= tour.km
-      previousKey = tour.key
-      count++
-    }
-  })
+  if (tours.length && freeDays.length && gap >= minTour * 0.6) {
+    const neededDays = Math.ceil(gap / maxDailyKm)
+    const dayCount = Math.min(freeDays.length, Math.max(1, neededDays, Math.round(gap / medianTour)))
+    const travelDays = shuffle(random, freeDays).slice(0, dayCount).sort()
+    const weights = travelDays.map(() => 0.6 + random() * 0.8)
+    const weightSum = weights.reduce((a, b) => a + b, 0)
+    const dayTargets = weights.map((w) => (w / weightSum) * gap)
+    let previousKey = null
+    travelDays.forEach((date, i) => {
+      let remaining = dayTargets[i]
+      let count = 0
+      while (remaining >= minTour * 0.6 && count < MAX_TOURS_PER_DAY) {
+        const used = dayKm.get(date) || 0
+        const aim = remaining > maxTour * 1.2 ? Math.min(remaining / 2, maxTour) : remaining
+        const fitting = tours.filter((t) => used + t.km <= maxDailyKm)
+        // Не повтаряме вчерашния маршрут, освен ако няма друг вариант.
+        const fresh = fitting.filter((t) => t.key !== previousKey)
+        const candidates = (fresh.length ? fresh : fitting)
+          .sort((a, b) => Math.abs(a.km - aim) - Math.abs(b.km - aim))
+          .slice(0, 4)
+        if (candidates.length === 0) break
+        const tour = pickVaried(candidates)
+        trips.push({ date, tour })
+        use(tour)
+        dayKm.set(date, used + tour.km)
+        remaining -= tour.km
+        previousKey = tour.key
+        count++
+      }
+    })
+    gap = businessKm - longTrips.reduce((s, t) => s + t.tour.km, 0) - trips.reduce((s, t) => s + t.tour.km, 0)
+  }
 
-  const sumKm = () => trips.reduce((s, t) => s + t.tour.km, 0)
-  let gap = businessKm - sumKm() // > 0: липсват км; < 0: има излишни
-
-  // ---- 5. Донастройка чрез размяна на обиколки ----
+  // ---- 4. Донастройка чрез размяна ----
   for (let iter = 0; iter < 5000 && Math.abs(gap) > 1 && trips.length > 0; iter++) {
     const trip = pickRandom(random, trips)
     const used = dayKm.get(trip.date) - trip.tour.km
@@ -178,29 +256,32 @@ export function generateTrips(options) {
     const newGap = gap - (option.km - trip.tour.km)
     if (Math.abs(newGap) < Math.abs(gap)) {
       dayKm.set(trip.date, used + option.km)
+      use(trip.tour, -1)
+      use(option)
       trip.tour = option
       gap = newGap
     }
     // Ако липсват много км, добавяме обиколка: първо в свободен ден,
     // после в най-слабо натоварения ден, в който има място.
     if (gap > minTour) {
-      const free = days.filter((d) => !dayKm.has(d))
+      const free = freeDays.filter((d) => !dayKm.has(d))
       const date = free.length
         ? pickRandom(random, free)
-        : [...days].filter((d) => toursOn(d) < MAX_TOURS_PER_DAY).sort((a, b) => dayKm.get(a) - dayKm.get(b))[0]
+        : [...freeDays].filter((d) => toursOn(d) < MAX_TOURS_PER_DAY).sort((a, b) => dayKm.get(a) - dayKm.get(b))[0]
       if (date) {
-        const used = dayKm.get(date) || 0
-        const t = tours.filter((x) => x.km <= gap + 1 && used + x.km <= maxDailyKm).sort((a, b) => b.km - a.km)[0]
+        const used2 = dayKm.get(date) || 0
+        const t = tours.filter((x) => x.km <= gap + 1 && used2 + x.km <= maxDailyKm).sort((a, b) => b.km - a.km)[0]
         if (t) {
           trips.push({ date, tour: t })
-          dayKm.set(date, used + t.km)
+          use(t)
+          dayKm.set(date, used2 + t.km)
           gap -= t.km
         }
       }
     }
   }
 
-  // 5б. Ако една размяна не стига, пробваме да сменим две пътувания наведнъж.
+  // 4б. Размяна на две пътувания наведнъж.
   for (let iter = 0; iter < 400 && Math.abs(gap) > 1 && trips.length > 1; iter++) {
     const a = pickRandom(random, trips)
     const b = pickRandom(random, trips)
@@ -220,7 +301,6 @@ export function generateTrips(options) {
       if (best && best.miss === 0) break
     }
     if (best && best.miss < Math.abs(gap)) {
-      // ако двете са в един ден, проверяваме общия дневен лимит
       if (a.date === b.date && dayKm.get(a.date) - a.tour.km - b.tour.km + best.ta.km + best.tb.km > maxDailyKm) continue
       dayKm.set(a.date, dayKm.get(a.date) - a.tour.km + best.ta.km)
       dayKm.set(b.date, dayKm.get(b.date) - b.tour.km + best.tb.km)
@@ -230,56 +310,76 @@ export function generateTrips(options) {
     }
   }
 
-  // ---- 6. Гаранция за толеранса ----
-  // 6а. Излишни км: махаме пътуването, което най-добре затваря разликата.
-  while (gap < -1 && trips.length > 0) {
-    let bestIndex = 0
-    for (let i = 1; i < trips.length; i++) {
-      if (Math.abs(gap + trips[i].tour.km) < Math.abs(gap + trips[bestIndex].tour.km)) bestIndex = i
+  // 4в. Размяна на командировка с друга командировка (същите два дни).
+  for (let iter = 0; iter < 200 && Math.abs(gap) > 1 && longTrips.length > 0; iter++) {
+    const trip = pickRandom(random, longTrips)
+    const wanted = trip.tour.km + gap
+    const option = [...longTours].sort((a, b) => Math.abs(a.km - wanted) - Math.abs(b.km - wanted))[0]
+    const newGap = gap - (option.km - trip.tour.km)
+    // Командировките са дълги: не допускаме да "прескочат" целта, защото
+    // после излишъкът се маха с цяло пътуване.
+    if (newGap >= -1 && Math.abs(newGap) < Math.abs(gap)) {
+      trip.tour = option
+      gap = newGap
     }
-    const [removed] = trips.splice(bestIndex, 1)
-    dayKm.set(removed.date, dayKm.get(removed.date) - removed.tour.km)
-    gap += removed.tour.km
   }
 
-  // 6б. Липсващи км: кратко градско служебно пътуване (банка, куриер, институции)
-  //     в дни с най-малко км. Всяко е до 40 км, за да остане правдоподобно.
-  const cityTrips = []
-  if (gap > 1) {
-    let rest = gap
-    const byLoad = [...days].sort((a, b) => (dayKm.get(a) || 0) - (dayKm.get(b) || 0))
-    for (const date of byLoad) {
-      if (rest <= 0) break
-      const room = maxDailyKm - (dayKm.get(date) || 0)
-      let piece = Math.min(rest, CITY_TRIP_MAX_KM, room)
-      if (piece < 2) continue
-      if (rest - piece === 1) piece -= 1 // не оставяме остатък от 1 км за следващ ден
-      cityTrips.push({ date, km: piece })
-      dayKm.set(date, (dayKm.get(date) || 0) + piece)
-      rest -= piece
-    }
-    gap = rest
+  // ---- 5. Гаранция за толеранса ----
+  // 5а. Излишни км: махаме пътуването, което най-добре затваря разликата.
+  while (gap < -1 && trips.length + longTrips.length > 0) {
+    const all = [...trips.map((t) => ({ list: trips, t })), ...longTrips.map((t) => ({ list: longTrips, t }))]
+    const best = all.reduce((a, b) => (Math.abs(gap + b.t.tour.km) < Math.abs(gap + a.t.tour.km) ? b : a))
+    best.list.splice(best.list.indexOf(best.t), 1)
+    if (best.list === trips) dayKm.set(best.t.date, dayKm.get(best.t.date) - best.t.tour.km)
+    else best.t.dates.forEach((d) => reserved.delete(d))
+    gap += best.t.tour.km
   }
+
+  // 5б. Липсващи км: кратки градски служебни пътувания с различна дължина
+  //     (12–40 км), в дни без командировка и с място до дневния лимит.
+  const cityTrips = []
+  let rest = gap > 1 ? gap : 0
+  for (let guard = 0; rest > 1 && guard < 500; guard++) {
+    const open = days.filter((d) => !reserved.has(d) && maxDailyKm - (dayKm.get(d) || 0) >= 2)
+    if (!open.length) break
+    const date = pickRandom(random, open)
+    const room = maxDailyKm - (dayKm.get(date) || 0)
+    let piece = Math.min(rest, room, 12 + Math.floor(random() * 29))
+    if (rest - piece > 0 && rest - piece < 12) piece = Math.min(rest, room, CITY_TRIP_MAX_KM)
+    if (rest - piece === 1) piece -= 1 // не оставяме остатък от 1 км
+    if (piece < 2) continue
+    cityTrips.push({ date, km: piece, purpose: pickRandom(random, CITY_PURPOSES) })
+    dayKm.set(date, (dayKm.get(date) || 0) + piece)
+    rest -= piece
+  }
+  if (gap > 1) gap = rest
   if (Math.abs(gap) > 1) {
-    // Не би трябвало да се случва след проверката за капацитет; пазим се от тих грешен резултат.
     throw new Error('Не успях да разпределя километрите в рамките на ±1 км. Опитайте „Генерирай отново“.')
   }
 
   // ---- Сглобяване на редовете на пътния лист ----
+  const visit = (d) => (d.purpose ? `${d.purpose} – ${d.name}` : `Служебно посещение – ${d.name}`)
   const rows = [
     ...trips.map((t) => ({
       date: t.date,
       order: 0,
       route: [base.name, ...t.tour.stops.map((d) => d.name), base.name].join(' – '),
-      purpose: t.tour.stops.map((d) => (d.purpose ? `${d.purpose} – ${d.name}` : `Служебно посещение – ${d.name}`)).join('; '),
+      purpose: t.tour.stops.map(visit).join('; '),
       km: t.tour.km,
       isPersonal: false,
     })),
+    ...longTrips.flatMap(({ tour, dates }) => {
+      const dest = tour.stops[0]
+      return [
+        { date: dates[0], order: 0, route: `${base.name} – ${dest.name}`, purpose: `Командировка: ${visit(dest)}`, km: tour.legs[0], isPersonal: false, leg: 'out' },
+        { date: dates[1], order: 0, route: `${dest.name} – ${base.name}`, purpose: `Връщане от командировка – ${dest.name}`, km: tour.legs[1], isPersonal: false, leg: 'back' },
+      ]
+    }),
     ...cityTrips.map((c) => ({
       date: c.date,
       order: 1,
       route: `${base.name} – служебни ангажименти в населеното място – ${base.name}`,
-      purpose: 'Банка, куриер, държавни институции',
+      purpose: c.purpose,
       km: c.km,
       isPersonal: false,
     })),
@@ -298,7 +398,17 @@ export function generateTrips(options) {
   })
 
   const totalKm = result.reduce((s, r) => s + r.km, 0)
-  return { trips: result, totalKm, targetKm, difference: totalKm - targetKm, seed, workingDays: days.length }
+  const fallbackKm = cityTrips.reduce((s, c) => s + c.km, 0)
+  return {
+    trips: result,
+    totalKm,
+    targetKm,
+    difference: totalKm - targetKm,
+    seed,
+    workingDays: days.length,
+    fallbackKm,
+    fallbackShare: fallbackKm / businessKm,
+  }
 }
 
 // Пресмята наново километража и сумите след ръчна редакция на ред.

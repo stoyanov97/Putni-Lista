@@ -38,6 +38,7 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
   const [refuelings, setRefuelings] = useState([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [warning, setWarning] = useState('')
   const [busy, setBusy] = useState(false)
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
@@ -95,6 +96,7 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
   async function generate() {
     setError('')
     setNotice('')
+    setWarning('')
     const problem = validateInput()
     if (problem) return setError(problem)
     const overlap = await issuedOverlapping(form.vehicleId, form.periodFrom, form.periodTo, draftId)
@@ -112,6 +114,13 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
         seed: Math.floor(Math.random() * 2 ** 31),
       })
       setTrips(result.trips)
+      // Много градски пътувания = дестинациите не стигат за реалистичен лист.
+      setWarning(
+        result.fallbackShare > 0.15
+          ? `${fmtNum(result.fallbackKm)} км (${Math.round(result.fallbackShare * 100)}%) са разпределени като градски служебни пътувания, ` +
+              'защото дестинациите не стигат. За по-реалистичен резултат добавете още клиенти, включително по-близки до базата.'
+          : '',
+      )
     } catch (e) {
       setError(e.message)
     }
@@ -268,6 +277,7 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
           {notice && <p className="ok">{notice}</p>}
         </div>
       </div>
+      {warning && <p className="warn callout">{warning}</p>}
 
       {trips && totals && (
         <>

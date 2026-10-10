@@ -156,3 +156,4 @@ tr.personal td { background: #fdf7ec; }
   .sheet { border: none; box-shadow: none; padding: 0; max-width: none; }
   @page { size: A4; margin: 12mm; }
 }
+.callout { background: #fbf0dc; border: 1px solid #f0d9a8; padding: .7rem 1rem; border-radius: 4px; margin-bottom: 1rem; max-width: 80ch; }

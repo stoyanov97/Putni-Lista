@@ -73,10 +73,18 @@ describe('реалистични маршрути', () => {
   })
 
   it('започват и завършват в базата', () => {
-    for (const t of result.trips) {
+    for (const t of result.trips.filter((x) => !x.leg)) {
       expect(t.route.startsWith(base.name)).toBe(true)
       expect(t.route.endsWith(base.name)).toBe(true)
     }
+  })
+
+  it('градските пътувания са различни по дължина и цел', () => {
+    const r = generateTrips(scenario({ targetKm: 500, destinations: [destinations[2]], seed: 3 }))
+    const city = r.trips.filter((t) => t.route.includes('населеното място'))
+    expect(city.length).toBeGreaterThan(2)
+    expect(new Set(city.map((t) => t.km)).size).toBeGreaterThan(1)
+    expect(r.fallbackKm).toBe(city.reduce((s, t) => s + t.km, 0))
   })
 
   it('не надвишават дневния лимит', () => {
@@ -104,6 +112,60 @@ describe('реалистични маршрути', () => {
     for (const t of tours.filter((x) => x.stops.length > 1)) {
       expect(t.km).toBeLessThanOrEqual(Math.round(t.stops.reduce((s, d) => s + single(d.id), 0)))
     }
+  })
+})
+
+describe('далечни дестинации (двудневни командировки)', () => {
+  // Офис в София, клиенти из цялата страна: обиколка в един ден е над 400 км.
+  const country = [
+    { id: 1, name: 'Офис София', lat: 42.6977, lon: 23.3219 },
+    { id: 2, name: 'Бургас', lat: 42.5048, lon: 27.4626 },
+    { id: 3, name: 'Варна', lat: 43.2141, lon: 27.9147 },
+    { id: 4, name: 'Стара Загора', lat: 42.4258, lon: 25.6345 },
+    { id: 5, name: 'Пловдив', lat: 42.1354, lon: 24.7453 },
+    { id: 6, name: 'Русе', lat: 43.8356, lon: 25.9657 },
+  ]
+  const m = estimatedDistances(country)
+  const ix = new Map(country.map((p, i) => [p.id, i]))
+  const dist = (a, b) => m[ix.get(a)][ix.get(b)]
+  const setup = (overrides) => scenario({ base: country[0], destinations: country.slice(1), distance: dist, ...overrides })
+
+  it('спазват толеранса при различни км', () => {
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = generateTrips(setup({ seed, targetKm: 300 + seed * 17 }))
+      expect(Math.abs(r.difference)).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('са в два поредни дни: отиване от базата и връщане в базата', () => {
+    let seen = 0
+    for (let seed = 1; seed <= 50; seed++) {
+      const r = generateTrips(setup({ seed, targetKm: 3000 }))
+      r.trips.forEach((t, i) => {
+        if (t.leg !== 'out') return
+        seen++
+        const back = r.trips.find((x, j) => j > i && x.leg === 'back')
+        expect(t.route.startsWith('Офис София')).toBe(true)
+        expect(back.route.endsWith('Офис София')).toBe(true)
+        const next = new Date(t.date + 'T00:00:00Z')
+        next.setUTCDate(next.getUTCDate() + 1)
+        expect(back.date).toBe(next.toISOString().slice(0, 10))
+        // В дните на командировката няма други пътувания
+        expect(r.trips.filter((x) => x.date === t.date || x.date === back.date)).toHaveLength(2)
+      })
+    }
+    expect(seen).toBeGreaterThan(0)
+  })
+
+  it('резервният вариант покрива малка част от км', () => {
+    let fallback = 0
+    let total = 0
+    for (let seed = 1; seed <= 100; seed++) {
+      const r = generateTrips(setup({ seed, targetKm: 1500 + seed * 20 }))
+      fallback += r.fallbackKm
+      total += r.totalKm
+    }
+    expect(fallback / total).toBeLessThan(0.1)
   })
 })
 
