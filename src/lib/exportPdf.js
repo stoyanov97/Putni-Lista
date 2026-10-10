@@ -28,7 +28,7 @@ export function waybillContent({ waybill, trips, refuelings, company }) {
   const body = trips.map((t) => [
     t.seq,
     fmtDate(t.trip_date),
-    t.is_personal ? `${t.route} (лично ползване)` : t.route,
+    t.is_personal && !/лично ползване/i.test(t.route) ? `${t.route} (лично ползване)` : t.route,
     t.purpose,
     { text: fmtNum(t.start_odometer), alignment: 'right' },
     { text: fmtNum(t.end_odometer), alignment: 'right' },

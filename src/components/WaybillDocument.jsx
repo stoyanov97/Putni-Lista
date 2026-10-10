@@ -51,7 +51,7 @@ export default function WaybillDocument({ data }) {
             <tr key={t.id} className={t.is_personal ? 'personal' : ''}>
               <td>{t.seq}</td>
               <td>{fmtDate(t.trip_date)}</td>
-              <td>{t.route}{t.is_personal && ' (лично ползване)'}</td>
+              <td>{t.route}{t.is_personal && !/лично ползване/i.test(t.route) && ' (лично ползване)'}</td>
               <td>{t.purpose}</td>
               <td className="num">{fmtNum(t.start_odometer)}</td>
               <td className="num">{fmtNum(t.end_odometer)}</td>
