@@ -129,10 +129,19 @@ export function pdfDefinition(list) {
   }
 }
 
-// В браузъра: зарежда pdfmake само при нужда (по-бързо първо отваряне на сайта).
+// Шрифтът, който PDF документът използва (bold = Roboto Medium).
+export const pdfFonts = {
+  Roboto: {
+    normal: 'Roboto-Regular.ttf',
+    bold: 'Roboto-Medium.ttf',
+    italics: 'Roboto-Regular.ttf',
+    bolditalics: 'Roboto-Medium.ttf',
+  },
+}
+
+// В браузъра: зарежда pdfmake и шрифта само при нужда (по-бързо първо отваряне на сайта).
 export async function downloadPdf(list, filename) {
   const pdfMake = (await import('pdfmake/build/pdfmake')).default
-  const fonts = (await import('pdfmake/build/vfs_fonts')).default
-  pdfMake.vfs = fonts.pdfMake ? fonts.pdfMake.vfs : fonts.vfs || fonts
-  pdfMake.createPdf(pdfDefinition(list)).download(filename)
+  const vfs = (await import('./pdfFonts.js')).default
+  pdfMake.createPdf(pdfDefinition(list), null, pdfFonts, vfs).download(filename)
 }
