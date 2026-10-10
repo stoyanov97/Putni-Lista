@@ -5,12 +5,16 @@ import { deleteDraft } from '../lib/waybillData'
 import { fmtDate, fmtNum } from '../lib/format'
 import { fuelLiters } from '../lib/routeGenerator'
 import { waybillNumber } from '../lib/waybillSummary'
+import { loadWaybill } from '../lib/waybillData'
+import { downloadPdf } from '../lib/exportPdf'
+import { downloadExcel } from '../lib/exportExcel'
 
 export default function History({ navigate }) {
   const [vehicles, setVehicles] = useState([])
   const [filter, setFilter] = useState({ vehicleId: '', from: '', to: '' })
   const [rows, setRows] = useState(null)
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     supabase.from('vehicles').select('id, reg_number').order('reg_number').then(({ data }) => setVehicles(data || []))
@@ -41,6 +45,22 @@ export default function History({ navigate }) {
     }
   }
 
+  // Експорт на всички издадени листове, видими с текущия филтър (сортирани по номер).
+  const issued = (rows || []).filter((r) => r.status === 'issued').sort((a, b) => a.number - b.number)
+  async function exportPeriod(kind) {
+    setBusy(true)
+    setError('')
+    try {
+      const list = await Promise.all(issued.map((r) => loadWaybill(r.id)))
+      const name = `putni-listove-${waybillNumber(issued[0].number)}-${waybillNumber(issued[issued.length - 1].number)}`
+      if (kind === 'pdf') await downloadPdf(list, `${name}.pdf`)
+      else await downloadExcel(list, `${name}.xlsx`)
+    } catch (e) {
+      setError(`Експортът не успя: ${e.message}`)
+    }
+    setBusy(false)
+  }
+
   return (
     <section>
       <h2>История</h2>
@@ -53,6 +73,11 @@ export default function History({ navigate }) {
         </label>
         <label><span>Период от</span><input type="date" value={filter.from} onChange={(e) => setFilter({ ...filter, from: e.target.value })} /></label>
         <label><span>Период до</span><input type="date" value={filter.to} onChange={(e) => setFilter({ ...filter, to: e.target.value })} /></label>
+        <div className="form-actions">
+          <span className="muted small">Експорт на {issued.length} издадени листа от филтъра:</span>
+          <button disabled={busy || !issued.length} onClick={() => exportPeriod('pdf')}>PDF</button>
+          <button disabled={busy || !issued.length} onClick={() => exportPeriod('excel')}>Excel</button>
+        </div>
       </div>
       {error && <p className="error">{error}</p>}
 
