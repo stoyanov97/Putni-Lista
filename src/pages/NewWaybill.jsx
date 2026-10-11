@@ -1,6 +1,6 @@
 // Основният поток: въвеждане на км → генериране → преглед и редакция → издаване.
 import { useEffect, useMemo, useState } from 'react'
-import { generateTrips, recalculate, fuelLiters } from '../lib/routeGenerator'
+import { generateTrips, recalculate, fuelLiters, destinationReach } from '../lib/routeGenerator'
 import { loadSetup, lastIssued, issuedOverlapping, saveDraft, issue, loadWaybill } from '../lib/waybillData'
 import { fmtDate, fmtNum } from '../lib/format'
 import { placeLabel } from '../lib/maps'
@@ -39,7 +39,7 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
   const [refuelings, setRefuelings] = useState([])
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [warning, setWarning] = useState('')
+  const [warning, setWarning] = useState([])
   const [busy, setBusy] = useState(false)
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
@@ -97,7 +97,7 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
   async function generate() {
     setError('')
     setNotice('')
-    setWarning('')
+    setWarning([])
     const problem = validateInput()
     if (problem) return setError(problem)
     const overlap = await issuedOverlapping(form.vehicleId, form.periodFrom, form.periodTo, draftId)
@@ -108,6 +108,25 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
     const places = setup.destinations.map((d) => ({ ...d, name: placeLabel(d) }))
     const base = places.find((d) => d.is_base)
     if (!base) return setError('Няма база (офис). Отбележете една дестинация като база.')
+    // Предупреждения, които не спират генерирането, но обясняват резултата.
+    const notes = []
+    const today = new Date().toISOString().slice(0, 10)
+    if (form.periodTo > today) {
+      notes.push('Периодът завършва в бъдещето. Пътен лист обикновено се издава за вече изминал период – проверете датите.')
+    }
+    const limit = Number(form.maxDailyKm) || 400
+    const reach = destinationReach(base, places, setup.distance, limit)
+    if (reach.unreachable.length) {
+      const farthest = Math.ceil(Math.max(...reach.unreachable.map((d) => d.oneWayKm)) / 10) * 10
+      notes.push(
+        `При лимит ${limit} км на ден не могат да се използват: ` +
+          reach.unreachable.map((d) => `${d.name} (${fmtNum(d.oneWayKm)} км в една посока)`).join(', ') +
+          `. За да участват, увеличете „Максимум км на ден“ до поне ${fmtNum(farthest)} км.`,
+      )
+    }
+    if (reach.missing.length) {
+      notes.push(`Без разстояние до базата (не се използват): ${reach.missing.map((d) => d.name).join(', ')}. Отворете „Разстояния“ → „Изчисли“.`)
+    }
     try {
       const result = generateTrips({
         periodFrom: form.periodFrom, periodTo: form.periodTo, targetKm: requestedKm, startOdometer,
@@ -118,15 +137,16 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
       })
       setTrips(result.trips)
       // Много градски пътувания = дестинациите не стигат за реалистичен лист.
-      setWarning(
-        result.fallbackShare > 0.15
-          ? `${fmtNum(result.fallbackKm)} км (${Math.round(result.fallbackShare * 100)}%) са разпределени като градски служебни пътувания, ` +
-              'защото дестинациите не стигат. За по-реалистичен резултат добавете още клиенти, включително по-близки до базата.'
-          : '',
-      )
+      if (result.fallbackShare > 0.15) {
+        notes.push(
+          `${fmtNum(result.fallbackKm)} км (${Math.round(result.fallbackShare * 100)}%) са разпределени като градски служебни пътувания, ` +
+            'защото дестинациите не стигат. За по-реалистичен резултат добавете още клиенти, включително по-близки до базата.',
+        )
+      }
     } catch (e) {
       setError(e.message)
     }
+    setWarning(notes)
   }
 
   // Ръчна редакция на ред: километражът и сумите се преизчисляват веднага.
@@ -280,7 +300,7 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
           {notice && <p className="ok">{notice}</p>}
         </div>
       </div>
-      {warning && <p className="warn callout">{warning}</p>}
+      {warning.map((w) => <p key={w} className="warn callout">{w}</p>)}
 
       {trips && totals && (
         <>

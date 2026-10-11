@@ -224,3 +224,16 @@ describe('календар', () => {
     expect(workingDays('2026-09-01', '2026-09-30')).toHaveLength(20)
   })
 })
+
+describe('достижимост на дестинациите', () => {
+  it('отличава твърде далечните и тези без разстояние', async () => {
+    const { destinationReach } = await import('../src/lib/routeGenerator.js')
+    const D = [{ id: 1, name: 'База' }, { id: 2, name: 'Близо' }, { id: 3, name: 'Варна' }, { id: 4, name: 'Без данни' }]
+    const km = { '1-2': 40, '2-1': 40, '1-3': 520, '3-1': 515 }
+    const r = destinationReach(D[0], D, (a, b) => km[`${a}-${b}`] ?? null, 400)
+    expect(r.unreachable.map((d) => d.name)).toEqual(['Варна'])
+    expect(r.unreachable[0].oneWayKm).toBe(520)
+    expect(r.missing.map((d) => d.name)).toEqual(['Без данни'])
+    expect(destinationReach(D[0], D, (a, b) => km[`${a}-${b}`] ?? null, 550).unreachable).toEqual([])
+  })
+})

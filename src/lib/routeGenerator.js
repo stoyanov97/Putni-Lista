@@ -481,3 +481,21 @@ export function recalculate(trips, startOdometer) {
 export function fuelLiters(km, consumptionPer100) {
   return Math.round(km * consumptionPer100) / 100
 }
+
+// Кои дестинации алгоритъмът може да използва при даден дневен лимит.
+// Служи за предупреждение в интерфейса, за да не "изчезват" дестинации тихо.
+export function destinationReach(base, destinations, distance, maxDailyKm) {
+  const unreachable = [] // твърде далеч дори за двудневна командировка
+  const missing = [] // няма разстояние до/от базата
+  for (const d of destinations) {
+    if (d.id === base.id) continue
+    const out = distance(base.id, d.id)
+    const back = distance(d.id, base.id)
+    if (out == null || back == null) {
+      missing.push(d)
+      continue
+    }
+    if (out > maxDailyKm || back > maxDailyKm) unreachable.push({ ...d, oneWayKm: Math.max(out, back) })
+  }
+  return { unreachable, missing }
+}
