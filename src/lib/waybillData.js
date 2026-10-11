@@ -80,7 +80,7 @@ export async function saveDraft(id, header, trips, refuelings) {
           waybill_id: waybillId,
           refuel_date: r.date,
           liters: Number(r.liters),
-          invoice_number: r.invoice || null,
+          invoice_number: String(r.invoice || '').trim() || null,
         })),
       ),
     )
@@ -102,6 +102,15 @@ export async function loadWaybill(id) {
     supabase.from('company').select('*').eq('id', 1).maybeSingle().then(check),
   ])
   return { waybill, trips, refuelings, company }
+}
+
+// Фактури от списъка, които вече са в друг пътен лист (издаден или чернова).
+export async function invoicesUsedElsewhere(invoices, exceptWaybillId) {
+  if (!invoices.length) return []
+  let q = supabase.from('refuelings').select('invoice_number, waybill_id, waybills(number)').in('invoice_number', invoices)
+  if (exceptWaybillId) q = q.neq('waybill_id', exceptWaybillId)
+  const rows = await q.then(check)
+  return rows.map((r) => ({ invoice_number: r.invoice_number, number: r.waybills?.number ?? null }))
 }
 
 export async function deleteDraft(id) {

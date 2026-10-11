@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, friendlyError } from '../lib/supabase'
 
-export default function RegistryPage({ table, title, intro, fields, columns, orderBy = 'id', prepare, validate, emptyText, extra }) {
+export default function RegistryPage({ table, title, intro, fields, columns, orderBy = 'id', prepare, validate, emptyText, extra, warnDuplicate }) {
   const blank = Object.fromEntries(fields.map((f) => [f.name, f.type === 'checkbox' ? false : '']))
   const [rows, setRows] = useState([])
   const [form, setForm] = useState(blank)
@@ -51,6 +51,12 @@ export default function RegistryPage({ table, title, intro, fields, columns, ord
     }
     const problem = validate ? validate(values) : ''
     if (problem) return setError(problem)
+    // Предупреждение (не забрана) при същата стойност, напр. двама водачи с едно име.
+    if (warnDuplicate) {
+      const norm = (x) => String(x ?? '').trim().toLowerCase()
+      const twin = rows.find((r) => r.id !== editingId && norm(r[warnDuplicate.field]) === norm(values[warnDuplicate.field]))
+      if (twin && !confirm(warnDuplicate.message(twin))) return
+    }
 
     setBusy(true)
     setNotice('')

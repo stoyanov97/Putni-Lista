@@ -1,7 +1,8 @@
 // Основният поток: въвеждане на км → генериране → преглед и редакция → издаване.
 import { useEffect, useMemo, useState } from 'react'
 import { generateTrips, recalculate, fuelLiters, destinationReach } from '../lib/routeGenerator'
-import { loadSetup, lastIssued, issuedOverlapping, saveDraft, issue, loadWaybill } from '../lib/waybillData'
+import { loadSetup, lastIssued, issuedOverlapping, saveDraft, issue, loadWaybill, invoicesUsedElsewhere } from '../lib/waybillData'
+import { normalizeInvoice } from '../lib/validators'
 import { fmtDate, fmtNum } from '../lib/format'
 import { placeLabel } from '../lib/maps'
 
@@ -180,8 +181,12 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
       if (!Number.isInteger(Number(t.km)) || Number(t.km) <= 0) return `Ред ${n}: км трябва да са цяло положително число.`
       if (!t.route.trim() || !t.purpose.trim()) return `Ред ${n}: попълнете маршрут и цел.`
     }
+    const seen = new Set()
     for (const [i, r] of refuelings.entries()) {
       if (!r.date || !(Number(r.liters) > 0)) return `Зареждане ${i + 1}: попълнете дата и литри.`
+      const invoice = normalizeInvoice(r.invoice)
+      if (invoice && seen.has(invoice)) return `Фактура № ${invoice} е въведена два пъти в този лист.`
+      if (invoice) seen.add(invoice)
     }
     return ''
   }
@@ -195,6 +200,12 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
     if (andIssue && !confirm('След издаване пътният лист получава пореден номер и не може да се променя. Продължавате ли?')) return
     setBusy(true)
     try {
+      // Една фактура за гориво не може да се отчита в два пътни листа.
+      const used = await invoicesUsedElsewhere(refuelings.map((r) => normalizeInvoice(r.invoice)).filter(Boolean), draftId)
+      if (used.length) {
+        const u = used[0]
+        throw new Error(`Фактура № ${u.invoice_number} вече е използвана в ${u.number ? `пътен лист № ${String(u.number).padStart(6, '0')}` : 'друга чернова'}.`)
+      }
       const header = {
         vehicle_id: Number(form.vehicleId), driver_id: Number(form.driverId),
         period_from: form.periodFrom, period_to: form.periodTo,
@@ -236,7 +247,7 @@ export default function NewWaybill({ draftId: initialDraftId, navigate }) {
         <label><span>Водач<span className="req"> *</span></span>
           <select value={form.driverId} onChange={(e) => set({ driverId: e.target.value })}>
             <option value="">Изберете…</option>
-            {setup.drivers.map((d) => <option key={d.id} value={d.id}>{d.full_name}</option>)}
+            {setup.drivers.map((d) => <option key={d.id} value={d.id}>{d.full_name}{d.position ? ` – ${d.position}` : ''}</option>)}
           </select>
         </label>
         <label><span>Период от<span className="req"> *</span></span>

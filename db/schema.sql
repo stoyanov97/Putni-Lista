@@ -244,3 +244,10 @@ create policy "auth_all" on refuelings   for all to authenticated using (true) w
 
 revoke execute on function issue_waybill(bigint) from public;
 grant  execute on function issue_waybill(bigint) to authenticated;
+
+-- ---------- Рег. номер във формат на кирилица; уникални фактури ----------
+alter table vehicles add constraint vehicles_reg_number_format
+  check (reg_number ~ '^[АВЕКМНОРСТУХ]{1,2}[0-9]{4}[АВЕКМНОРСТУХ]{1,2}$');
+create unique index refuelings_invoice_unique
+  on refuelings (invoice_number)
+  where invoice_number is not null and invoice_number <> '';

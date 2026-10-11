@@ -1,5 +1,5 @@
 import RegistryPage from '../components/RegistryPage'
-import { normalizeRegNumber } from '../lib/validators'
+import { normalizeRegNumber, validateRegNumber } from '../lib/validators'
 
 const fuelTypes = ['Бензин', 'Дизел', 'Газ (LPG)', 'Метан (CNG)', 'Хибрид', 'Електричество']
 
@@ -14,13 +14,15 @@ export default function Vehicles() {
       fields={[
         { name: 'make', label: 'Марка', type: 'text', required: true, placeholder: 'Skoda' },
         { name: 'model', label: 'Модел', type: 'text', required: true, placeholder: 'Octavia' },
-        { name: 'reg_number', label: 'Рег. номер', type: 'text', required: true, placeholder: 'СА1234АВ' },
+        { name: 'reg_number', label: 'Рег. номер', type: 'text', required: true, placeholder: 'СА1234АВ (кирилица или латиница)' },
         { name: 'fuel_type', label: 'Вид гориво', type: 'select', required: true, options: fuelTypes },
         { name: 'consumption_l100', label: 'Разход, л/100 км', type: 'number', required: true, step: '0.1', min: '0.1', placeholder: '6.5' },
         { name: 'start_odometer', label: 'Начален километраж', type: 'number', required: true, step: '1', min: '0', placeholder: '125000' },
       ]}
       prepare={(v) => ({ ...v, reg_number: normalizeRegNumber(v.reg_number) })}
       validate={(v) => {
+        const reg = validateRegNumber(v.reg_number)
+        if (reg) return reg
         if (!(v.consumption_l100 > 0 && v.consumption_l100 < 50)) return 'Разходът трябва да е между 0 и 50 л/100 км.'
         if (!Number.isInteger(v.start_odometer) || v.start_odometer < 0) return 'Километражът трябва да е цяло положително число.'
         return ''
